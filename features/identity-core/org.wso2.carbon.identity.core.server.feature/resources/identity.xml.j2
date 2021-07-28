@@ -2762,4 +2762,16 @@
         	<Cookie name="{{cookie}}"/>
         	{% endfor %}
     </CookiesToInvalidate>
+
+    <!-- Userstore type mapping -->
+    {% if user_store_mgt.user_store_type_mapping is defined %}
+    <UserstoreTypeMappings>
+        {% for user_store_type_mapping in user_store_mgt.user_store_type_mapping %}
+        <UserstoreTypeMapping>
+            <UserstoreName>{{user_store_type_mapping.userstore_name}}</UserstoreName>
+            <UserstoreType>{{user_store_type_mapping.userstore_type}}</UserstoreType>
+        </UserstoreTypeMapping>
+        {% endfor %}
+    </UserstoreTypeMappings>
+    {% endif %}
 </Server>
