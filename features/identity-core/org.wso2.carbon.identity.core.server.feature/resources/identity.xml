@@ -1969,4 +1969,25 @@
         <ApplicationName>My Account</ApplicationName>
     </SystemApplications>
 
+
+    <!-- User store type mapping -->
+    <UserstoreTypeMappings>
+        <UserstoreTypeMapping>
+            <UserstoreName>org.wso2.carbon.user.core.jdbc.UniqueIDJDBCUserStoreManager</UserstoreName>
+            <UserstoreType>JDBC</UserstoreType>
+        </UserstoreTypeMapping>
+        <UserstoreTypeMapping>
+            <UserstoreName>org.wso2.carbon.user.core.ldap.UniqueIDActiveDirectoryUserStoreManager</UserstoreName>
+            <UserstoreType>AD</UserstoreType>
+        </UserstoreTypeMapping>
+        <UserstoreTypeMapping>
+            <UserstoreName>org.wso2.carbon.user.core.ldap.UniqueIDReadOnlyLDAPUserStoreManager</UserstoreName>
+            <UserstoreType>LDAP</UserstoreType>
+        </UserstoreTypeMapping>
+        <UserstoreTypeMapping>
+            <UserstoreName>org.wso2.carbon.user.core.ldap.UniqueIDReadWriteLDAPUserStoreManager</UserstoreName>
+            <UserstoreType>LDAP</UserstoreType>
+        </UserstoreTypeMapping>
+    </UserstoreTypeMappings>
+
 </Server>
