@@ -687,6 +687,8 @@ public class DefaultStepBasedSequenceHandler implements StepBasedSequenceHandler
             setThreadLocalProvisioningServiceProvider(context);
             setLocalUnfilteredClaimsForNullValues(context, extAttributesValueMap);
             setAttributeSyncMethodToThreadLocal(context);
+            setIdpGroupSyncMethodToThreadLocal(context);
+            setIdpGroupMappedRoleIdsToThreadLocal(context);
 
             FrameworkUtils.getProvisioningHandler()
                     .handleWithV2Roles(assignedRoleIdList, subjectIdentifier, extAttributesValueMap, userStoreDomain,
@@ -791,4 +793,30 @@ public class DefaultStepBasedSequenceHandler implements StepBasedSequenceHandler
         IdentityUtil.threadLocalProperties.get().put(FrameworkConstants.ATTRIBUTE_SYNC_METHOD,
                 context.getExternalIdP().getAttributeSyncMethod());
     }
+
+    /**
+     * Set IDP group sync method to thread local.
+     *
+     * @param context Authentication context.
+     */
+    private void setIdpGroupSyncMethodToThreadLocal(AuthenticationContext context) {
+        IdentityUtil.threadLocalProperties.get().put(FrameworkConstants.IDP_GROUP_SYNC_METHOD,
+                context.getExternalIdP().getIdpGroupSyncMethod());
+    }
+
+    /**
+     * Set all IDP group-mapped role IDs to thread local.
+     * This includes all roles that are mapped to any IDP group configured for the IDP.
+     *
+     * @param context Authentication context.
+     * @throws FrameworkException If an error occurred while getting the role IDs.
+     */
+    private void setIdpGroupMappedRoleIdsToThreadLocal(AuthenticationContext context) throws FrameworkException {
+
+        List<String> allIdpGroupMappedRoleIds = FrameworkUtils.getAllRoleIdsOfIdpGroups(
+                context.getExternalIdP(), context.getTenantDomain());
+        IdentityUtil.threadLocalProperties.get().put(FrameworkConstants.IDP_GROUP_MAPPED_ROLE_IDS,
+                allIdpGroupMappedRoleIds);
+    }
+
 }

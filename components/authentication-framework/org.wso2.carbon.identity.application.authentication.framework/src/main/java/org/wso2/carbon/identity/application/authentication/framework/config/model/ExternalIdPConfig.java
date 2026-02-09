@@ -294,6 +294,21 @@ public class ExternalIdPConfig implements Serializable {
     }
 
     /**
+     * Get IDP group sync method.
+     *
+     * @return IDP group sync method. Defaults to PRESERVE_LOCAL if not configured.
+     */
+    public String getIdpGroupSyncMethod() {
+
+        String method = FrameworkConstants.PRESERVE_LOCAL;
+        if (justInTimeProConfig != null &&
+                StringUtils.isNotEmpty(justInTimeProConfig.getIdpGroupSyncMethod())) {
+            method = justInTimeProConfig.getIdpGroupSyncMethod();
+        }
+        return method;
+    }
+
+    /**
      * @return
      */
     public String getRoleClaimUri() {

@@ -248,7 +248,10 @@ public abstract class FrameworkConstants {
 
     // Attribute sync related constants.
     public static final String ATTRIBUTE_SYNC_METHOD = "attributeSyncMethod";
+    public static final String IDP_GROUP_SYNC_METHOD = "idpGroupSyncMethod";
+    public static final String IDP_GROUP_MAPPED_ROLE_IDS = "idpGroupMappedRoleIds";
     public static final String OVERRIDE_ALL = "OVERRIDE_ALL";
+    public static final String REPLACE_IDP_MAPPED = "REPLACE_IDP_MAPPED";
     public static final String SYNC_NONE = "NONE";
     public static final String PRESERVE_LOCAL = "PRESERVE_LOCAL";
     public static final String RESTART_LOGIN_FLOW = "restartLoginFlow";

@@ -214,6 +214,8 @@ public class DefaultProvisioningHandler implements ProvisioningHandler {
             IdentityUtil.clearIdentityErrorMsg();
             IdentityUtil.threadLocalProperties.get().remove(FrameworkConstants.JIT_PROVISIONING_FLOW);
             IdentityUtil.threadLocalProperties.get().remove(FrameworkConstants.ATTRIBUTE_SYNC_METHOD);
+            IdentityUtil.threadLocalProperties.get().remove(FrameworkConstants.IDP_GROUP_SYNC_METHOD);
+            IdentityUtil.threadLocalProperties.get().remove(FrameworkConstants.IDP_GROUP_MAPPED_ROLE_IDS);
         }
     }
 
@@ -472,6 +474,10 @@ public class DefaultProvisioningHandler implements ProvisioningHandler {
             throws UserStoreException, FrameworkException {
 
         try {
+            // Get the IDP group sync method from thread local.
+            String idpGroupSyncMethod = getIdpGroupSyncMethod();
+
+            // Check if manually added local roles should be preserved (backward compatible property).
             boolean includeManuallyAddedLocalRoles = Boolean
                     .parseBoolean(IdentityUtil.getProperty(SEND_MANUALLY_ADDED_LOCAL_ROLES_OF_IDP));
 
@@ -487,17 +493,99 @@ public class DefaultProvisioningHandler implements ProvisioningHandler {
                     organizationId, tenantDomain, rolesToAdd);
 
             List<String> currentRoleIdList = roleManagementService.getRoleIdListOfUser(userId, tenantDomain);
-            List<String> rolesToDelete;
+            List<String> rolesToDelete = new ArrayList<>();
 
-            rolesToAdd.removeAll(currentRoleIdList);
-            if (includeManuallyAddedLocalRoles) {
-                rolesToDelete = new ArrayList<>();
+            // Get the everyone role ID to exclude from deletion.
+            String everyoneRoleId = getEveryoneRoleId(roleManagementService, organizationId, tenantDomain, realm);
+
+            if (FrameworkConstants.OVERRIDE_ALL.equals(idpGroupSyncMethod)) {
+                /*
+                 * OVERRIDE_ALL: Replace all roles of the user with IDP roles.
+                 * Remove all existing roles (except everyone role) and add only roles from IDP.
+                 */
+                if (log.isDebugEnabled()) {
+                    log.debug("IDP group sync method is set to OVERRIDE_ALL. Replacing all roles with IDP roles " +
+                            "for user: " + username);
+                }
+
+                // Roles to delete: all existing roles that are not in the IDP role list.
+                for (String currentRoleId : currentRoleIdList) {
+                    if (!rolesToAdd.contains(currentRoleId)) {
+                        rolesToDelete.add(currentRoleId);
+                    }
+                }
+
+                // Roles to add: IDP roles that are not already assigned.
+                rolesToAdd.removeAll(currentRoleIdList);
+
+            } else if (FrameworkConstants.REPLACE_IDP_MAPPED.equals(idpGroupSyncMethod)) {
+                /*
+                 * REPLACE_IDP_MAPPED: Replace only IDP group-related local roles based on the federated response.
+                 * Keep manually added local roles. Only sync roles that are mapped from the IDP groups configured
+                 * for this IDP.
+                 *
+                 * Logic:
+                 * 1. Get all role IDs that are mapped to any IDP group of this IDP.
+                 * 2. Among current user roles, find those that are IDP-mapped (intersection with all IDP-mapped roles).
+                 * 3. Delete IDP-mapped roles that are NOT in the incoming federated roles (rolesToAdd).
+                 * 4. Add roles from federated response that are not already assigned.
+                 */
+                if (log.isDebugEnabled()) {
+                    log.debug("IDP group sync method is set to REPLACE_IDP_MAPPED. Syncing only IDP group-mapped " +
+                            "roles for user: " + username);
+                }
+
+                // Get all IDP group-mapped role IDs from thread local.
+                List<String> allIdpGroupMappedRoleIds = getIdpGroupMappedRoleIds();
+
+                // Find current roles that are IDP-mapped.
+                List<String> currentIdpMappedRoles = new ArrayList<>();
+                for (String currentRoleId : currentRoleIdList) {
+                    if (allIdpGroupMappedRoleIds.contains(currentRoleId)) {
+                        currentIdpMappedRoles.add(currentRoleId);
+                    }
+                }
+
+                // Roles to delete: IDP-mapped roles that are NOT in the incoming federated roles.
+                for (String currentIdpMappedRole : currentIdpMappedRoles) {
+                    if (!rolesToAdd.contains(currentIdpMappedRole)) {
+                        rolesToDelete.add(currentIdpMappedRole);
+                    }
+                }
+
+                // Roles to add: federated roles that are not already assigned.
+                rolesToAdd.removeAll(currentRoleIdList);
+
+            } else if (FrameworkConstants.PRESERVE_LOCAL.equals(idpGroupSyncMethod)) {
+                /*
+                 * PRESERVE_LOCAL: Preserve locally added roles.
+                 * Behavior depends on includeManuallyAddedLocalRoles property.
+                 * - If true: Only add new IDP roles without removing any existing roles.
+                 * - If false: Remove roles not in IDP list and add new IDP roles.
+                 */
+                if (log.isDebugEnabled()) {
+                    log.debug("IDP group sync method is set to PRESERVE_LOCAL for user: " + username +
+                            ". includeManuallyAddedLocalRoles: " + includeManuallyAddedLocalRoles);
+                }
+
+                // Remove already assigned roles from rolesToAdd.
+                rolesToAdd.removeAll(currentRoleIdList);
+
+                if (!includeManuallyAddedLocalRoles) {
+                    // Roles to delete: current roles minus the original rolesToAdd (before modification).
+                    rolesToDelete = new ArrayList<>(currentRoleIdList);
+                    rolesToDelete.removeAll(rolesToAdd);
+                }
             } else {
-                rolesToDelete = new ArrayList<>(currentRoleIdList);
-                rolesToDelete.removeAll(rolesToAdd);
+                // Unrecognized sync method - log warning and skip role synchronization.
+                log.warn("Unrecognized IDP group sync method: " + idpGroupSyncMethod + " for user: " + username +
+                        ". Skipping role synchronization. Valid values are: " + FrameworkConstants.PRESERVE_LOCAL +
+                        ", " + FrameworkConstants.OVERRIDE_ALL + ", " + FrameworkConstants.REPLACE_IDP_MAPPED);
+                return;
             }
+
             // Remove everyone role from deleting roles.
-            rolesToDelete.remove(getEveryoneRoleId(roleManagementService, organizationId, tenantDomain, realm));
+            rolesToDelete.remove(everyoneRoleId);
 
             // Assign the user to the adding roles.
             for (String roleId : rolesToAdd) {
@@ -505,11 +593,52 @@ public class DefaultProvisioningHandler implements ProvisioningHandler {
             }
             // Remove the assignment of the user from the deleting roles.
             for (String roleId : rolesToDelete) {
-                removeUserFromRoleV2(userId, username, roleId, tenantDomain, roleManagementService);
+                try {
+                    String adminUserName = realm.getRealmConfiguration().getAdminUserName();
+                    PrivilegedCarbonContext.startTenantFlow();
+                    PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain(tenantDomain, true);
+                    PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(adminUserName);
+                    PrivilegedCarbonContext.getThreadLocalCarbonContext().setUserRealm(realm);
+                    removeUserFromRoleV2(userId, username, roleId, tenantDomain, roleManagementService);
+                } finally {
+                    PrivilegedCarbonContext.endTenantFlow();
+                }
             }
         } catch (UserSessionException | IdentityRoleManagementException | OrganizationManagementException e) {
             throw new FrameworkException("Error while retrieving roles of user: " + username, e);
         }
+    }
+
+    /**
+     * Get IDP group sync method from thread local.
+     *
+     * @return IDP group sync method. Defaults to PRESERVE_LOCAL if not set.
+     */
+    private String getIdpGroupSyncMethod() {
+
+        Object idpGroupSyncMethodObj = IdentityUtil.threadLocalProperties.get()
+                .get(FrameworkConstants.IDP_GROUP_SYNC_METHOD);
+        if (idpGroupSyncMethodObj != null && StringUtils.isNotBlank(idpGroupSyncMethodObj.toString())) {
+            return idpGroupSyncMethodObj.toString();
+        }
+        // Default to PRESERVE_LOCAL (backward compatible behavior) if not set or blank.
+        return FrameworkConstants.PRESERVE_LOCAL;
+    }
+
+    /**
+     * Get all IDP group-mapped role IDs from thread local.
+     *
+     * @return List of all IDP group-mapped role IDs. Returns empty list if not set.
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> getIdpGroupMappedRoleIds() {
+
+        Object idpGroupMappedRoleIdsObj = IdentityUtil.threadLocalProperties.get()
+                .get(FrameworkConstants.IDP_GROUP_MAPPED_ROLE_IDS);
+        if (idpGroupMappedRoleIdsObj instanceof List) {
+            return (List<String>) idpGroupMappedRoleIdsObj;
+        }
+        return new ArrayList<>();
     }
 
     /**
